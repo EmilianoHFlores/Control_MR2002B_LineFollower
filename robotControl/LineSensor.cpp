@@ -76,7 +76,7 @@ void LineSensor::lineDetected(bool *line_detected){
   for (int i = 0; i < 4; i++){
     // brighter returns a lower value, so center sensors return 1 unless less than threshold
     //line_detected[i] = (sensor_values[i] > (averages_[i] + sensor_threshold_));
-    line_detected[i] = (sensor_values[i] > 800);
+    line_detected[i] = (sensor_values[i] > 950);
     //Serial.print(sensor_values[i]);
     //Serial.print(" ");
   }

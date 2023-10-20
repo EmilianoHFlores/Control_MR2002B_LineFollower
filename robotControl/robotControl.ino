@@ -19,6 +19,9 @@ int motor_right_pwm_pin_ = 5;
 uint8_t motor_right_encoderA_ = 2;
 uint8_t motor_right_encoderB_ = 2;
 
+// line leds
+uint8_t line_leds_[4] = {30, 28, 26, 24};
+
 // PID objects
 PID *pid_motor_left_ = nullptr;
 PID *pid_motor_right_ = nullptr;
@@ -32,9 +35,9 @@ const double motor_right_kp =  0.5480; //15;
 const double motor_right_ki = 0.2264; // 6;
 const double motor_right_kd = 0.1822; // 2;
 
-const double motor_left_kp =  0.5480; 
-const double motor_left_ki = 0.2264; 
-const double motor_left_kd = 0.1822; 
+const double motor_left_kp = 0.5480;// 0.5328; 
+const double motor_left_ki = 0.2264; //0.2022; 
+const double motor_left_kd = 0.1822;//0.1868; 
 
 const long kSampleTime = 20;
 unsigned long PRBS_sample_time_ = 0; 
@@ -97,6 +100,11 @@ void setup() {
   pinMode(motor_right_encoderA_, INPUT);
   pinMode(motor_right_encoderB_, INPUT);
 
+  // line leds
+  for (int i=0; i<4; i++){
+    pinMode(line_leds_[i], OUTPUT);
+  }
+
   //Motor Stop 
   analogWrite(motor_right_pwm_pin_, LOW);
   digitalWrite(motor_right_digital_one_, LOW);
@@ -129,26 +137,75 @@ void setup() {
 
 bool line_detected[4] = {false, false, false, false};
 float line_error = 0;
-float multiplier = 60;
+float multiplier = 30;
+
+enum lineState{
+  lineLeft,
+  lineCenterLeft,
+  lineCenter,
+  lineCenterRight,
+  lineRight
+};
+
+lineState line_state = lineCenter;
 
 void loop() {
   curr_time_ = millis();
 
   linesensor.lineDetected(line_detected);
 
+  for (int i=0; i<4; i++){
+    if (line_detected[i]){
+      digitalWrite(line_leds_[i], HIGH);
+    } else {
+      digitalWrite(line_leds_[i], LOW);
+    }
+  }
+
   //arduinoPlot(0, 5, line_detected[0], line_detected[1], line_detected[2], line_detected[3], 0,0,0,0);
   arduinoPlot(0, 5, RPM2RPS(target_speed_), motor_left_current_speed_, motor_right_current_speed_, motor_left_pwm_, motor_right_pwm_,0,0,0);
-  if (curr_time_ - PRBS_passed_time_ > 10000){
+  /*if (curr_time_ - PRBS_passed_time_ > 10000){
    target_speed_ += 30;
    PRBS_passed_time_ = millis();
-  } 
+  } */
 
   // positive if line is to the right
-  line_error = 0;//line_detected[0] * multiplier - line_detected[3] * multiplier;
-  
-    
-  pid_motor_left_->computeSpeed(RPM2RPS(target_speed_ - line_error), motor_left_current_speed_, motor_left_pwm_, motor_left_pid_tics_, kPulsesPerRevolution, kPidCountTimeSamplesInOneSecond);
-  pid_motor_right_->computeSpeed(RPM2RPS(target_speed_ + line_error), motor_right_current_speed_, motor_right_pwm_, motor_right_pid_tics_, kPulsesPerRevolution, kPidCountTimeSamplesInOneSecond);
+  if (line_detected[0]){
+    line_state = lineLeft;
+  }
+  else if (line_detected[1] && line_detected[2]){
+    line_state = lineCenter;
+  }
+  else if (line_detected[3]){
+    line_state = lineRight;
+  }
+
+  switch (line_state){
+    case lineLeft:
+      line_error = -multiplier;
+      break;
+    case lineCenterLeft:
+      line_error = -multiplier/2;
+      break;
+    case lineCenter:
+      line_error = 0;
+      break;
+    case lineCenterRight:
+      line_error = multiplier/2;
+      break;
+    case lineRight:
+      line_error = multiplier;
+      break;
+  }
+
+  /*Serial.print("Motor1: ");
+  Serial.print(target_speed_ + line_error);
+  Serial.print(" ");
+  Serial.print("Motor2: ");
+  Serial.println(target_speed_ - line_error);*/
+
+  pid_motor_left_->computeSpeed(RPM2RPS(target_speed_ + line_error), motor_left_current_speed_, motor_left_pwm_, motor_left_pid_tics_, kPulsesPerRevolution, kPidCountTimeSamplesInOneSecond);
+  pid_motor_right_->computeSpeed(RPM2RPS(target_speed_ - line_error), motor_right_current_speed_, motor_right_pwm_, motor_right_pid_tics_, kPulsesPerRevolution, kPidCountTimeSamplesInOneSecond);
 
   analogWrite(motor_left_pwm_pin_, motor_left_pwm_*255/5);
   analogWrite(motor_right_pwm_pin_, motor_right_pwm_*255/5);
