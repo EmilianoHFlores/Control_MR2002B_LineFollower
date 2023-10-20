@@ -2,8 +2,35 @@
 #include "Motor.h"
 #include "LineSensor.h"
 #include "ArduinoPlotter.h"
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+#define MAX_STRING_SIZE 4 // Maximum string length you expect to receive
+
+char received_buffer[MAX_STRING_SIZE];
+uint8_t received_buffer_index = 0;
+
+RF24 radio(9, 8);
+const byte address[6] = "10001";
+bool receivedData = false; // Flag to track received data
+
+uint8_t rpms;
 
 LineSensor linesensor;
+
+
+
+bool line_detected[4] = {false, false, false, false};
+float line_error = 0;
+float multiplier;
+
+enum lineState{
+  lineLeft,
+  lineCenterLeft,
+  lineCenter,
+  lineCenterRight,
+  lineRight
+};
 
 // Motor left
 uint8_t motor_left_digital_one_ = 13;
@@ -46,7 +73,7 @@ unsigned long PRBS_passed_time_ = 0;
 unsigned long curr_time_ = 0;
 
 // Motor speed
-int target_speed_ = 60;
+int target_speed_ = 80;
 double motor_left_current_speed_ = 0;
 double motor_right_current_speed_ = 0;
 bool state_ = false;
@@ -69,6 +96,11 @@ static constexpr double kPidCountTimeSamplesInOneMinute = kSecondsInMinute*kPidC
 
 void setup() {
   Serial.begin(115200);
+
+  radio.begin();
+  radio.openReadingPipe(1, address); // Use the same address as the transmitter
+  radio.setPALevel(RF24_PA_MIN);
+  radio.startListening(); // Start listening for incoming data
 
   linesensor.init();
 
@@ -135,22 +167,19 @@ void setup() {
   PRBS_passed_time_ = millis();
 }
 
-bool line_detected[4] = {false, false, false, false};
-float line_error = 0;
-float multiplier = 30;
-
-enum lineState{
-  lineLeft,
-  lineCenterLeft,
-  lineCenter,
-  lineCenterRight,
-  lineRight
-};
-
 lineState line_state = lineCenter;
 
 void loop() {
+  if (radio.available()) {
+    radio.read(received_buffer, MAX_STRING_SIZE - 1);
+    uint8_t value = received_buffer[0];
+    target_speed_ = value;
+    /*Serial.print("Value: ");
+    Serial.println(value);*/
+  }
+
   curr_time_ = millis();
+  multiplier = target_speed_ / 2;
 
   linesensor.lineDetected(line_detected);
 
@@ -170,8 +199,15 @@ void loop() {
   } */
 
   // positive if line is to the right
+  lineState prev_state = line_state;
   if (line_detected[0]){
     line_state = lineLeft;
+  }
+  else if (line_detected[1] && !line_detected[2]){
+    line_state = lineCenterLeft;
+  }
+  else if (!line_detected[1] && line_detected[2]){
+    line_state = lineCenterRight;
   }
   else if (line_detected[1] && line_detected[2]){
     line_state = lineCenter;
@@ -185,13 +221,19 @@ void loop() {
       line_error = -multiplier;
       break;
     case lineCenterLeft:
-      line_error = -multiplier/2;
+      if (prev_state == lineCenterLeft)
+        line_error = -multiplier/2;
+      else
+        line_error = -multiplier/4;
       break;
     case lineCenter:
       line_error = 0;
       break;
     case lineCenterRight:
-      line_error = multiplier/2;
+      if (prev_state == lineCenterRight)
+        line_error = multiplier/2;
+      else
+        line_error = multiplier/4;
       break;
     case lineRight:
       line_error = multiplier;
